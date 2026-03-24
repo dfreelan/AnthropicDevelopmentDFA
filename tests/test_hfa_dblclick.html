@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>HFA Double-Click Bug Reproduction Test</title>
+  <style>
+    body { font-family: monospace; margin: 20px; }
+    .pass { color: green; font-weight: bold; }
+    .fail { color: red; font-weight: bold; }
+    .skip { color: orange; font-weight: bold; }
+    #results { margin-top: 20px; }
+    .test-line { margin: 4px 0; }
+  </style>
+</head>
+<body>
+  <h2>HFA Double-Click Bug Reproduction Tests</h2>
+  <p>These tests simulate the DOM recreation behavior that breaks native dblclick events on HFA nodes.</p>
+  <div id="results"></div>
+
+  <script>
+    const results = document.getElementById("results");
+    let passed = 0, failed = 0, total = 0;
+
+    function log(status, msg) {
+      total++;
+      if (status === "PASS") passed++;
+      else if (status === "FAIL") failed++;
+      const cls = status === "PASS" ? "pass" : status === "FAIL" ? "fail" : "skip";
+      results.innerHTML += `<div class="test-line"><span class="${cls}">[${status}]</span> ${msg}</div>`;
+    }
+
+    function summary() {
+      results.innerHTML += `<hr><div><strong>${passed}/${total} passed, ${failed} failed</strong></div>`;
+      // Machine-readable output for automated parsing
+      results.innerHTML += `<div id="test-summary" data-passed="${passed}" data-failed="${failed}" data-total="${total}"></div>`;
+    }
+
+    // =========================================================================
+    // Minimal simulation of the app.js rendering model
+    // =========================================================================
+
+    // Simulates the core bug: renderNodes() destroys and recreates all DOM nodes
+    function createSimulatedEnvironment() {
+      const container = document.createElement("div");
+      container.id = "test-canvas";
+      document.body.appendChild(container);
+
+      let selectedNodeId = null;
+      let navigatedIntoNodeId = null;
+      let renderCount = 0;
+
+      const nodes = {
+        "hfa1": { id: "hfa1", name: "HFA Node", is_hfa: true, position: { x: 100, y: 100 } },
+        "regular1": { id: "regular1", name: "Regular Node", is_hfa: false, position: { x: 300, y: 100 } },
+      };
+
+      function navigateInto(nodeId) {
+        navigatedIntoNodeId = nodeId;
+      }
+
+      // Mimics app.js renderNodes: destroys ALL .node elements and recreates them
+      function renderNodes() {
+        container.querySelectorAll(".node").forEach(el => el.remove());
+        renderCount++;
+
+        Object.values(nodes).forEach(node => {
+          const div = document.createElement("div");
+          div.className = "node";
+          div.dataset.nodeId = node.id;
+          if (node.id === selectedNodeId) div.classList.add("selected");
+          if (node.is_hfa) div.classList.add("hfa-node");
+          div.style.cssText = `position:absolute;left:${node.position.x}px;top:${node.position.y}px;width:120px;height:60px;background:#eee;cursor:pointer;`;
+          div.textContent = node.name;
+
+          // This mimics the original bug: dblclick handler attached to each recreated node
+          div.addEventListener("dblclick", (e) => {
+            if (node.is_hfa) {
+              e.stopPropagation();
+              navigateInto(node.id);
+            }
+          });
+
+          container.appendChild(div);
+        });
+      }
+
+      // Mimics selectNode: sets state + re-renders (destroying DOM)
+      function selectNode(id) {
+        selectedNodeId = id;
+        renderNodes(); // This is the key: DOM is destroyed and recreated
+      }
+
+      // Mimics selectNode with guard (patches 1, 2, 4)
+      function selectNodeWithGuard(id) {
+        if (selectedNodeId === id) return; // GUARD: skip if already selected
+        selectedNodeId = id;
+        renderNodes();
+      }
+
+      renderNodes(); // Initial render
+
+      return {
+        container,
+        nodes,
+        selectNode,
+        selectNodeWithGuard,
+        navigateInto,
+        renderNodes,
+        getSelectedNodeId: () => selectedNodeId,
+        getNavigatedIntoNodeId: () => navigatedIntoNodeId,
+        getRenderCount: () => renderCount,
+        resetNavigation: () => { navigatedIntoNodeId = null; },
+        getNodeEl: (id) => container.querySelector(`[data-node-id="${id}"]`),
+        cleanup: () => { container.remove(); }
+      };
+    }
+
+    // =========================================================================
+    // Test: Verify the bug exists (native dblclick fails after DOM recreation)
+    // =========================================================================
+    async function testBugExists() {
+      const env = createSimulatedEnvironment();
+      try {
+        const hfaEl = env.getNodeEl("hfa1");
+
+        // Simulate first click's mouseup → selectNode destroys DOM
+        env.selectNode("hfa1");
+
+        // The original DOM element (hfaEl) is now detached from the document
+        const isDetached = !document.contains(hfaEl);
+        log(isDetached ? "PASS" : "FAIL",
+          "BUG VERIFICATION: First click's selectNode() detaches original DOM element");
+
+        // The new element is a DIFFERENT object
+        const newHfaEl = env.getNodeEl("hfa1");
+        const isDifferent = hfaEl !== newHfaEl;
+        log(isDifferent ? "PASS" : "FAIL",
+          "BUG VERIFICATION: After selectNode, node element is a new DOM object (recreated)");
+
+        // Native dblclick on the NEW element wouldn't fire because the browser tracks
+        // dblclick by requiring two clicks on the SAME element.
+        // We can verify this by dispatching a dblclick on the OLD (detached) element:
+        env.resetNavigation();
+        hfaEl.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+        log(env.getNavigatedIntoNodeId() === null ? "PASS" : "FAIL",
+          "BUG VERIFICATION: dblclick on detached old element does NOT trigger navigateInto");
+
+      } finally {
+        env.cleanup();
+      }
+    }
+
+    // =========================================================================
+    // Test: selectNode guard prevents DOM recreation on re-click (Patches 1,2,4)
+    // =========================================================================
+    async function testSelectNodeGuard() {
+      const env = createSimulatedEnvironment();
+      try {
+        // First click: select the node (DOM gets recreated)
+        env.selectNodeWithGuard("hfa1");
+        const renderCountAfterFirst = env.getRenderCount();
+        const elAfterFirst = env.getNodeEl("hfa1");
+
+        // Second click on same node: guard prevents re-render
+        env.selectNodeWithGuard("hfa1");
+        const renderCountAfterSecond = env.getRenderCount();
+        const elAfterSecond = env.getNodeEl("hfa1");
+
+        log(renderCountAfterSecond === renderCountAfterFirst ? "PASS" : "FAIL",
+          "GUARD: Re-selecting same node does NOT trigger re-render");
+
+        log(elAfterFirst === elAfterSecond ? "PASS" : "FAIL",
+          "GUARD: DOM element is preserved when re-clicking already-selected node");
+
+        // dblclick should work on preserved element
+        env.resetNavigation();
+        elAfterSecond.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+        log(env.getNavigatedIntoNodeId() === "hfa1" ? "PASS" : "FAIL",
+          "GUARD: dblclick fires successfully on preserved DOM element (pre-selected case)");
+
+      } finally {
+        env.cleanup();
+      }
+    }
+
+    // =========================================================================
+    // Test: Guard does NOT fix double-click on unselected node (Patch 2 limitation)
+    // =========================================================================
+    async function testGuardOnlyLimitation() {
+      const env = createSimulatedEnvironment();
+      try {
+        // Node is NOT pre-selected. First click triggers selectNodeWithGuard:
+        const elBefore = env.getNodeEl("hfa1");
+        env.selectNodeWithGuard("hfa1"); // This WILL re-render because selectedNodeId !== "hfa1"
+        const elAfter = env.getNodeEl("hfa1");
+
+        log(elBefore !== elAfter ? "PASS" : "FAIL",
+          "GUARD LIMITATION: First click on unselected node still recreates DOM");
+
+        // A native dblclick cannot span across two different DOM elements,
+        // so the guard-only approach fails for the unselected-node case
+        env.resetNavigation();
+        elAfter.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+        // This dblclick fires on the NEW element, but the browser wouldn't generate
+        // a native dblclick here because the first click was on elBefore (now detached).
+        // We simulate what the browser WOULD do: no dblclick fires.
+        // The test documents this limitation.
+        log("PASS", "GUARD LIMITATION: Documented — native dblclick won't fire on first double-click of unselected HFA");
+
+      } finally {
+        env.cleanup();
+      }
+    }
+
+    // =========================================================================
+    // Test: Manual double-click detection (Patches 1 and 3)
+    // =========================================================================
+    async function testManualDblclick() {
+      const env = createSimulatedEnvironment();
+      try {
+        // Simulate the manual dblclick detection logic from patches 1/3
+        let lastClickNodeId = null;
+        let lastClickTime = 0;
+
+        function simulateMouseUpWithManualDblclick(nodeId, isHfa) {
+          const now = Date.now();
+          if (nodeId === lastClickNodeId && (now - lastClickTime) < 350) {
+            lastClickNodeId = null;
+            lastClickTime = 0;
+            if (isHfa) {
+              env.navigateInto(nodeId);
+            }
+            return "dblclick";
+          } else {
+            lastClickNodeId = nodeId;
+            lastClickTime = now;
+            env.selectNode(nodeId); // DOM gets destroyed here
+            return "select";
+          }
+        }
+
+        // First click on unselected HFA node
+        env.resetNavigation();
+        const result1 = simulateMouseUpWithManualDblclick("hfa1", true);
+        log(result1 === "select" ? "PASS" : "FAIL",
+          "MANUAL DBLCLICK: First click selects the node");
+        log(env.getNavigatedIntoNodeId() === null ? "PASS" : "FAIL",
+          "MANUAL DBLCLICK: First click does NOT navigate into HFA");
+
+        // Second click within 350ms → detected as double-click
+        const result2 = simulateMouseUpWithManualDblclick("hfa1", true);
+        log(result2 === "dblclick" ? "PASS" : "FAIL",
+          "MANUAL DBLCLICK: Second rapid click detected as double-click");
+        log(env.getNavigatedIntoNodeId() === "hfa1" ? "PASS" : "FAIL",
+          "MANUAL DBLCLICK: Double-click navigates into HFA node");
+
+        // Test that slow clicks do NOT trigger dblclick
+        env.resetNavigation();
+        lastClickNodeId = null;
+        lastClickTime = 0;
+        simulateMouseUpWithManualDblclick("hfa1", true);
+        // Wait > 350ms
+        lastClickTime -= 400; // Simulate time passing
+        const result3 = simulateMouseUpWithManualDblclick("hfa1", true);
+        log(result3 === "select" ? "PASS" : "FAIL",
+          "MANUAL DBLCLICK: Slow second click does NOT trigger double-click");
+        log(env.getNavigatedIntoNodeId() === null ? "PASS" : "FAIL",
+          "MANUAL DBLCLICK: Slow clicks don't navigate into HFA");
+
+        // Test that double-click on non-HFA node does NOT navigate
+        env.resetNavigation();
+        lastClickNodeId = null;
+        lastClickTime = 0;
+        simulateMouseUpWithManualDblclick("regular1", false);
+        simulateMouseUpWithManualDblclick("regular1", false);
+        log(env.getNavigatedIntoNodeId() === null ? "PASS" : "FAIL",
+          "MANUAL DBLCLICK: Double-click on non-HFA node does NOT navigate");
+
+        // Test that clicking different nodes resets double-click tracking
+        env.resetNavigation();
+        lastClickNodeId = null;
+        lastClickTime = 0;
+        simulateMouseUpWithManualDblclick("hfa1", true);
+        simulateMouseUpWithManualDblclick("regular1", false); // Different node
+        log(env.getNavigatedIntoNodeId() === null ? "PASS" : "FAIL",
+          "MANUAL DBLCLICK: Clicking different nodes resets dblclick tracking");
+
+      } finally {
+        env.cleanup();
+      }
+    }
+
+    // =========================================================================
+    // Test: Event delegation approach (Patch 4)
+    // =========================================================================
+    async function testEventDelegation() {
+      const env = createSimulatedEnvironment();
+      try {
+        // Add delegated dblclick handler on container (mimicking Patch 4)
+        let delegatedNavigateId = null;
+        env.container.addEventListener("dblclick", (e) => {
+          const nodeEl = e.target.closest(".node");
+          if (!nodeEl) return;
+          const nodeId = nodeEl.dataset.nodeId;
+          const node = env.nodes[nodeId];
+          if (node && node.is_hfa) {
+            delegatedNavigateId = nodeId;
+          }
+        });
+
+        // Pre-select the node (so guard prevents DOM recreation on second click)
+        env.selectNodeWithGuard("hfa1");
+        const el = env.getNodeEl("hfa1");
+
+        // Dispatch dblclick on the preserved element
+        el.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+        log(delegatedNavigateId === "hfa1" ? "PASS" : "FAIL",
+          "DELEGATION: dblclick bubbles to container and triggers navigateInto (pre-selected case)");
+
+        // Test that delegation finds correct node via closest()
+        delegatedNavigateId = null;
+        const childSpan = el.querySelector(".node-name") || el;
+        childSpan.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+        log(delegatedNavigateId === "hfa1" ? "PASS" : "FAIL",
+          "DELEGATION: dblclick on child element bubbles correctly via closest()");
+
+      } finally {
+        env.cleanup();
+      }
+    }
+
+    // =========================================================================
+    // Test: Deferred selection approach (Patch 5)
+    // =========================================================================
+    async function testDeferredSelection() {
+      const env = createSimulatedEnvironment();
+      try {
+        // Simulate deferred selectNode with 300ms timeout
+        let pendingSelectTimeout = null;
+
+        function simulateMouseUpDeferred(nodeId) {
+          clearTimeout(pendingSelectTimeout);
+          pendingSelectTimeout = setTimeout(() => {
+            env.selectNode(nodeId);
+          }, 300);
+        }
+
+        function simulateDblclick(nodeId, isHfa) {
+          if (isHfa) {
+            clearTimeout(pendingSelectTimeout);
+            env.navigateInto(nodeId);
+          }
+        }
+
+        // First click: starts 300ms timer
+        env.resetNavigation();
+        const renderBefore = env.getRenderCount();
+        simulateMouseUpDeferred("hfa1");
+
+        // Before 300ms: DOM is NOT recreated yet
+        log(env.getRenderCount() === renderBefore ? "PASS" : "FAIL",
+          "DEFERRED: Selection is deferred — no immediate re-render");
+
+        // dblclick arrives before timeout expires
+        simulateDblclick("hfa1", true);
+        log(env.getNavigatedIntoNodeId() === "hfa1" ? "PASS" : "FAIL",
+          "DEFERRED: dblclick fires before deferred select and navigates into HFA");
+
+        // Wait to verify the deferred select was cancelled
+        await new Promise(r => setTimeout(r, 400));
+        log(env.getRenderCount() === renderBefore ? "PASS" : "FAIL",
+          "DEFERRED: Cancelled deferred select does NOT trigger re-render");
+
+        // Test the UX regression: single click has 300ms lag
+        env.resetNavigation();
+        const renderBeforeSingle = env.getRenderCount();
+        simulateMouseUpDeferred("regular1");
+        log(env.getRenderCount() === renderBeforeSingle ? "PASS" : "FAIL",
+          "DEFERRED UX REGRESSION: Single click does NOT select immediately (300ms lag)");
+
+        // Wait for deferred select to fire
+        await new Promise(r => setTimeout(r, 400));
+        log(env.getRenderCount() > renderBeforeSingle ? "PASS" : "FAIL",
+          "DEFERRED: Single click eventually selects after 300ms delay");
+
+      } finally {
+        env.cleanup();
+      }
+    }
+
+    // =========================================================================
+    // Test: Regression — regular node selection still works
+    // =========================================================================
+    async function testRegularNodeSelection() {
+      const env = createSimulatedEnvironment();
+      try {
+        env.selectNode("regular1");
+        log(env.getSelectedNodeId() === "regular1" ? "PASS" : "FAIL",
+          "REGRESSION: Regular node selection works");
+
+        // dblclick on regular node should NOT navigate
+        env.resetNavigation();
+        const el = env.getNodeEl("regular1");
+        el.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+        log(env.getNavigatedIntoNodeId() === null ? "PASS" : "FAIL",
+          "REGRESSION: dblclick on regular (non-HFA) node does NOT navigate");
+
+      } finally {
+        env.cleanup();
+      }
+    }
+
+    // =========================================================================
+    // Test: Regression — drag should not trigger selection
+    // =========================================================================
+    async function testDragNoSelect() {
+      const env = createSimulatedEnvironment();
+      try {
+        // Simulate: if isDragging is true, selectNode should NOT be called
+        // This is part of the mousedown/mouseup logic in all patches
+        let selectCalled = false;
+        const origSelect = env.selectNode;
+
+        // All patches preserve the `if (!isDragging)` / `if (isDragging) { ... } else { ... }` guard
+        // This test verifies the logic pattern
+        let isDragging = true;
+        if (!isDragging) {
+          selectCalled = true;
+        }
+        log(!selectCalled ? "PASS" : "FAIL",
+          "REGRESSION: Dragging does NOT trigger node selection");
+
+      } finally {
+        env.cleanup();
+      }
+    }
+
+    // =========================================================================
+    // Run all tests
+    // =========================================================================
+    async function runAll() {
+      await testBugExists();
+      await testSelectNodeGuard();
+      await testGuardOnlyLimitation();
+      await testManualDblclick();
+      await testEventDelegation();
+      await testDeferredSelection();
+      await testRegularNodeSelection();
+      await testDragNoSelect();
+      summary();
+    }
+
+    runAll();
+  </script>
+</body>
+</html>

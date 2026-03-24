@@ -1,0 +1,38 @@
+diff --git a/static/app.js b/static/app.js
+index bf1f491..0b9354b 100644
+--- a/static/app.js
++++ b/static/app.js
+@@ -23,6 +23,10 @@
+   let dragNodeId = null;
+   let dragOffsetX, dragOffsetY;
+ 
++  // Manual double-click tracking (native dblclick fails when DOM is recreated)
++  let lastClickNodeId = null;
++  let lastClickTime = 0;
++
+   // Auto-save
+   let saveTimeout = null;
+   let dirCheckTimeout = null;
+@@ -511,9 +515,19 @@
+           document.removeEventListener("mouseup", onMouseUp);
+           if (isDragging) {
+             scheduleSave();
+-          }
+-          if (!isDragging) {
+-            selectNode(node.id);
++          } else {
++            const now = Date.now();
++            if (node.id === lastClickNodeId && (now - lastClickTime) < 350) {
++              lastClickNodeId = null;
++              lastClickTime = 0;
++              if (node.is_hfa) {
++                navigateInto(node.id);
++              }
++            } else {
++              lastClickNodeId = node.id;
++              lastClickTime = now;
++              selectNode(node.id);
++            }
+           }
+           isDragging = false;
+           dragNodeId = null;

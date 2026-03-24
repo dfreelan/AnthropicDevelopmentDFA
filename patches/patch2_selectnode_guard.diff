@@ -1,0 +1,12 @@
+diff --git a/static/app.js b/static/app.js
+index bf1f491..7b63c30 100644
+--- a/static/app.js
++++ b/static/app.js
+@@ -428,6 +428,7 @@
+ 
+   // --- Selection ---
+   function selectNode(id) {
++    if (selectedNodeId === id) return;
+     selectedNodeId = id;
+     renderAll();
+     showNodeEditPanel(id);

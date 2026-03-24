@@ -1,0 +1,45 @@
+diff --git a/static/app.js b/static/app.js
+index bf1f491..51c3738 100644
+--- a/static/app.js
++++ b/static/app.js
+@@ -428,6 +428,7 @@
+ 
+   // --- Selection ---
+   function selectNode(id) {
++    if (selectedNodeId === id) return;
+     selectedNodeId = id;
+     renderAll();
+     showNodeEditPanel(id);
+@@ -523,13 +524,6 @@
+         document.addEventListener("mouseup", onMouseUp);
+       });
+ 
+-      div.addEventListener("dblclick", (e) => {
+-        if (node.is_hfa) {
+-          e.stopPropagation();
+-          navigateInto(node.id);
+-        }
+-      });
+-
+       canvas.appendChild(div);
+     });
+   }
+@@ -982,6 +976,18 @@
+     addNode(targetName.trim(), sourceNode.position.x + offsetX, sourceNode.position.y + offsetY);
+   }
+ 
++  // --- HFA double-click via event delegation (survives DOM recreation) ---
++  canvasWrapper.addEventListener("dblclick", (e) => {
++    const nodeEl = e.target.closest(".node");
++    if (!nodeEl) return;
++    const nodeId = nodeEl.dataset.nodeId;
++    const ag = getActiveGraph();
++    const node = ag.nodes[nodeId];
++    if (node && node.is_hfa) {
++      navigateInto(nodeId);
++    }
++  });
++
+   // --- Canvas panning ---
+   canvasWrapper.addEventListener("mousedown", (e) => {
+     if (e.target === canvasWrapper || e.target.classList.contains("grid-bg") || e.target === canvas || e.target === connectionsSvg) {

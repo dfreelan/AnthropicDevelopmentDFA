@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claude State Machine Builder</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="{% if server_port == 5051 %}theme-green{% endif %}">
+  <!-- Toolbar -->
+  <div class="toolbar">
+    <div class="toolbar-left">
+      <button id="btnNew">New</button>
+      <button id="btnLoad">Load</button>
+      <button id="btnSave">Save</button>
+      <button id="btnDuplicate">Duplicate</button>
+      <button id="btnSaveAsHfa" title="Save this workspace as a reusable HFA node">Save as HFA</button>
+      <input type="text" id="graphName" placeholder="Workflow name">
+      <span id="saveStatus" class="save-status"></span>
+    </div>
+    <div class="toolbar-right">
+      <button id="btnRestartServer" class="danger">Reboot Server</button>
+      <button id="btnUndo" class="btn" title="Undo to previous snapshot" disabled>&#x21A9; Undo</button>
+      <button id="btnRedo" class="btn" title="Redo to next snapshot" disabled>&#x21AA; Redo</button>
+      <span id="snapshotInfo" class="snapshot-info"></span>
+      <button id="btnNewNode">+ New Node</button>
+      <button id="btnNewHfaNode">+ HFA Node</button>
+      <button id="btnRun" class="primary">Run</button>
+      <button id="btnCancel" class="danger" style="display:none">Cancel</button>
+      <button id="btnRestart" style="display:none">Restart</button>
+      <button id="btnEndChat" class="end-chat" style="display:none">End Chat</button>
+    </div>
+  </div>
+
+  <!-- Main layout -->
+  <div class="main-layout">
+    <!-- Side panel -->
+    <div id="sidePanel" class="side-panel">
+      <div class="side-panel-content">
+        <h3>GRAPH SETTINGS</h3>
+
+        <div class="form-group working-dir-wrapper">
+          <label>Working Directory</label>
+          <div class="working-dir-input-row">
+            <input type="text" id="workingDirInput" placeholder="PLACEHOLDER">
+            <button type="button" id="workingDirToggle" class="working-dir-toggle" title="Show history">&#x25BE;</button>
+          </div>
+          <div id="workingDirDropdown" class="working-dir-dropdown"></div>
+        </div>
+
+        <div class="form-group">
+          <label>Start Node</label>
+          <select id="startNodeSelect"></select>
+        </div>
+
+        <div class="form-group">
+          <label>Model Override</label>
+          <select id="modelOverrideSelect">
+            <option value="individual">Individual (per-node)</option>
+            <option value="claude-opus-4-6">Force all: Opus 4.6</option>
+            <option value="claude-sonnet-4-6">Force all: Sonnet 4.6</option>
+            <option value="claude-haiku-4-5-20251001">Force all: Haiku 4.5</option>
+          </select>
+        </div>
+
+        <div id="panelNoSelection">
+          <p class="hint">Click a node to edit it, or click "+ New Node" to add one.</p>
+          <h4>Node Library</h4>
+          <div class="form-group">
+            <input type="text" id="nodeLibrarySearch" placeholder="Search nodes from other graphs...">
+          </div>
+          <div id="nodeLibraryResults"></div>
+        </div>
+
+        <div id="panelNodeEdit" style="display:none">
+          <h3>NODE SETTINGS</h3>
+          <div class="form-group">
+            <label>Name</label>
+            <input type="text" id="nodeNameInput" placeholder="Node name">
+          </div>
+          <div class="form-group">
+            <div class="prompt-label-row">
+              <label>Prompt</label>
+              <button type="button" id="expandPromptBtn" class="expand-prompt-btn" title="Edit in fullscreen">&#x2922;</button>
+            </div>
+            <textarea id="nodePromptInput" rows="6" placeholder="What should Claude do at this state?"></textarea>
+          </div>
+          <div class="form-group" style="display:flex;align-items:center;gap:8px;">
+            <input type="checkbox" id="persistentContextCheckbox">
+            <label for="persistentContextCheckbox" style="margin:0;cursor:pointer;">Persistent context across revisits</label>
+          </div>
+
+          <div class="form-group">
+            <label>Model</label>
+            <select id="nodeModelSelect">
+              <option value="claude-opus-4-6">Opus 4.6</option>
+              <option value="claude-sonnet-4-6">Sonnet 4.6</option>
+              <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+            </select>
+          </div>
+
+          <div id="hfaControls" class="hfa-controls" style="display:none">
+            <label><input type="checkbox" id="hfaCheckbox"> HFA (contains sub-graph)</label>
+            <label id="hfaForwardIncomingLabel" style="display:none"><input type="checkbox" id="hfaForwardIncomingCheckbox"> Include HFA input in all child nodes</label>
+            <button id="btnEnterHfa" style="display:none">Enter HFA &rarr;</button>
+          </div>
+
+          <h4>Transitions</h4>
+          <div id="transitionsList"></div>
+          <button id="btnAddTransition" class="small">+ Add Transition</button>
+
+          <div class="node-actions">
+            <button id="btnSetStart" class="small">Set as Start</button>
+            <button id="btnDeleteNode" class="small danger">Delete Node</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Canvas -->
+    <div id="canvasWrapper" class="canvas-wrapper">
+      <div id="breadcrumbBar" class="breadcrumb-bar" style="display:none"></div>
+      <div class="grid-bg"></div>
+      <div id="canvas" class="canvas">
+        <svg id="connectionsSvg" class="connections-svg">
+          <defs>
+            <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+              <polygon points="0 0, 10 3.5, 0 7" />
+            </marker>
+          </defs>
+        </svg>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom panel (execution log) -->
+  <div id="bottomPanel" class="bottom-panel collapsed">
+    <div id="dragHandle" class="drag-handle"></div>
+    <div id="bottomPanelHeader" class="bottom-panel-header">
+      <span>Execution Log</span>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span id="execStatus" class="exec-status"></span>
+        <button id="btnFullscreen" class="panel-btn" title="Toggle fullscreen">&#x2922;</button>
+      </div>
+    </div>
+    <div id="execTabBar" class="exec-tab-bar" style="display:none"></div>
+    <div class="bottom-panel-content">
+      <div id="execLog" class="exec-log"></div>
+      <div id="interactiveBar" class="interactive-bar">
+        <span>Send message:</span>
+        <input type="text" id="interactiveInput" placeholder="Type a message to Claude...">
+        <button id="btnSendInteractive">Send</button>
+      </div>
+      <div id="feedbackBar" class="feedback-bar">
+        <span id="feedbackQuestion"></span>
+        <input type="text" id="feedbackInput" placeholder="Your response...">
+        <button id="btnSubmitFeedback">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Load Modal -->
+  <div class="modal-overlay" id="loadModal">
+    <div class="modal">
+      <h2>Load Workflow</h2>
+      <div id="graphList" class="graph-list"></div>
+      <div class="modal-actions">
+        <button id="btnCloseModal">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Run Input Modal -->
+  <div class="modal-overlay" id="runModal">
+    <div class="modal">
+      <h2>Run State Machine</h2>
+      <div class="form-group">
+        <label>Input data for the start state</label>
+        <textarea id="runInputData" rows="12" placeholder="Paste bug report, instructions, or any input for the first node..."></textarea>
+      </div>
+      <div class="form-group" style="display:flex;align-items:center;gap:8px;">
+        <input type="checkbox" id="includeOriginalQueryCheckbox">
+        <label for="includeOriginalQueryCheckbox" style="margin:0;cursor:pointer;">Include original query in all nodes</label>
+      </div>
+      <div id="imageDropZone" class="image-drop-zone">Drop images here, paste, or click to browse</div>
+      <input type="file" id="imageFileInput" multiple accept="image/*" style="display:none">
+      <div id="imagePreviews" class="image-previews"></div>
+      <div class="modal-actions">
+        <button id="btnCancelRun">Cancel</button>
+        <button id="btnConfirmRun" class="primary">Run</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reboot overlay -->
+  <div id="rebootOverlay" class="modal-overlay">
+    <div class="modal" style="text-align: center;">
+      <h3>Rebooting Server...</h3>
+      <p>Waiting for server to come back online.</p>
+      <div class="reboot-spinner"></div>
+    </div>
+  </div>
+
+  <!-- Prompt Editor Modal -->
+  <div class="modal-overlay" id="promptEditorOverlay">
+    <div class="modal prompt-editor-modal">
+      <h2>Edit Prompt: <span id="promptEditorNodeName"></span></h2>
+      <textarea id="promptEditorTextarea" placeholder="What should Claude do at this state?"></textarea>
+      <div class="prompt-editor-hint">Ctrl+Enter to save &middot; Escape to cancel</div>
+      <div class="modal-actions">
+        <button id="promptEditorCancel">Cancel</button>
+        <button id="promptEditorSave" class="primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,25 @@
+BUG REPORT
+==========
+
+Project: paginator.py, app.py
+Working directory: PLACEHOLDER
+
+Summary:
+  When the total number of items is not evenly divisible by per_page,
+  the last page of results is silently dropped. Users cannot access
+  the final items.
+
+Steps to reproduce:
+  1. Run: python3 app.py 1 10
+     - Shows Page 1 of 2 but there are 25 products
+     - 25 items / 10 per page should be 3 pages, not 2
+  2. Run: python3 app.py 3 10
+     - Page 3 shows zero items even though products 21-25 exist
+
+Expected behavior:
+  total_pages should be 3 for 25 items at 10 per page.
+  Page 3 should show the remaining 5 items.
+
+Actual behavior:
+  total_pages reports 2. The last 5 products are inaccessible
+  through the pagination API.

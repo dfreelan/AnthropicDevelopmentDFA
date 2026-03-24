@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plan and Iterate HFA_research - Interactive Viewer</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --surface: #1e293b;
+    --border: #334155;
+    --text: #e8e8e8;
+    --text-muted: #94a3b8;
+    --accent: #3b82f6;
+    --accent-glow: rgba(59,130,246,0.3);
+    --green: #27ae60;
+    --purple: #9b59b6;
+    --purple-light: #bb86fc;
+    --red: #e74c3c;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* Top bar */
+  .top-bar {
+    background: #111827;
+    border-bottom: 1px solid var(--border);
+    padding: 8px 16px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-shrink: 0;
+    z-index: 100;
+  }
+  .top-bar h1 { font-size: 15px; font-weight: 600; color: var(--accent); }
+  .top-bar .working-dir { font-size: 11px; color: var(--text-muted); }
+
+  /* Breadcrumbs */
+  .breadcrumbs {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+  }
+  .breadcrumbs .crumb {
+    cursor: pointer;
+    color: var(--accent);
+    padding: 2px 8px;
+    border-radius: 4px;
+    transition: background 0.15s;
+  }
+  .breadcrumbs .crumb:hover { background: rgba(59,130,246,0.15); }
+  .breadcrumbs .crumb.current { color: var(--text); cursor: default; }
+  .breadcrumbs .crumb.current:hover { background: none; }
+  .breadcrumbs .sep { color: var(--text-muted); }
+
+  /* Main layout */
+  .main-area {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* Canvas area */
+  .canvas-wrapper {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    cursor: grab;
+    background:
+      radial-gradient(circle at 1px 1px, rgba(255,255,255,0.03) 1px, transparent 0);
+    background-size: 30px 30px;
+  }
+  .canvas-wrapper:active { cursor: grabbing; }
+  #canvas {
+    position: absolute;
+    top: 0; left: 0;
+    width: 0; height: 0;
+    transform-origin: 0 0;
+  }
+
+  /* SVG connections */
+  .connections-svg {
+    position: absolute;
+    top: 0; left: 0;
+    width: 20000px; height: 20000px;
+    overflow: visible;
+    z-index: 10;
+    pointer-events: none;
+  }
+  .connections-svg path.conn {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 2;
+    opacity: 0.6;
+  }
+  .connections-svg text.conn-label {
+    fill: var(--accent);
+    font-size: 11px;
+    opacity: 0.85;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  #arrowhead polygon { fill: var(--accent); }
+
+  /* Nodes */
+  .node {
+    position: absolute;
+    min-width: 120px;
+    max-width: 220px;
+    padding: 14px 20px;
+    background: var(--surface);
+    border: 2px solid var(--border);
+    border-radius: 10px;
+    cursor: pointer;
+    user-select: none;
+    text-align: center;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    z-index: 20;
+  }
+  .node:hover { border-color: var(--accent); }
+  .node.selected {
+    border-color: var(--accent);
+    box-shadow: 0 0 12px var(--accent-glow);
+  }
+  .node.start-node { border-color: var(--green); }
+  .node.start-node:hover { border-color: var(--accent); }
+  .node.terminal-node { border-color: var(--red); border-style: dashed; }
+  .node-name { font-size: 14px; font-weight: 600; color: var(--text); }
+  .node.hfa-node { border-color: var(--purple); border-style: double; border-width: 3px; }
+  .node.hfa-node:hover { border-color: var(--purple-light); }
+  .node.hfa-node.selected { border-color: #8e44ad; box-shadow: 0 0 12px rgba(155,89,182,0.4); }
+  .hfa-badge {
+    background: rgba(155,89,182,0.25);
+    color: var(--purple-light);
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    position: absolute;
+    top: 4px; right: 4px;
+  }
+  .hfa-enter-hint { font-size: 10px; color: var(--purple); margin-top: 4px; opacity: 0.7; }
+  .persistent-badge {
+    background: rgba(226,183,20,0.2);
+    color: #e2b714;
+    font-size: 9px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    position: absolute;
+    bottom: 4px; right: 4px;
+  }
+
+  /* Right panel */
+  .side-panel {
+    width: 440px;
+    min-width: 300px;
+    border-left: 1px solid var(--border);
+    background: #111827;
+    overflow-y: auto;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .panel-empty {
+    color: var(--text-muted);
+    font-size: 13px;
+    padding: 40px 24px;
+    text-align: center;
+    line-height: 2;
+  }
+  .panel-header {
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .panel-header h2 { font-size: 16px; margin-bottom: 6px; }
+  .panel-meta { display: flex; gap: 6px; flex-wrap: wrap; }
+  .panel-meta .tag {
+    font-size: 10px;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text-muted);
+  }
+  .panel-section {
+    padding: 12px 20px;
+    border-bottom: 1px solid rgba(51,65,85,0.5);
+  }
+  .panel-section:last-child { border-bottom: none; }
+  .section-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--accent);
+    margin-bottom: 8px;
+    font-weight: 600;
+  }
+  .transitions-list { list-style: none; }
+  .transitions-list li {
+    padding: 6px 10px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 3px;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .t-label { color: var(--green); font-weight: 600; min-width: 140px; }
+  .t-arrow { color: var(--text-muted); }
+  .t-target { color: var(--accent); }
+  .prompt-block {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    font-size: 12.5px;
+    line-height: 1.65;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    color: var(--text);
+    max-height: 500px;
+    overflow-y: auto;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .prompt-block .auto-section {
+    color: var(--text-muted);
+    border-top: 1px dashed var(--border);
+    padding-top: 10px;
+    margin-top: 10px;
+    display: block;
+  }
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+  }
+  .toggle-row input { accent-color: var(--accent); }
+
+  /* Zoom controls */
+  .zoom-controls {
+    position: absolute;
+    bottom: 12px;
+    right: 12px;
+    display: flex;
+    gap: 4px;
+    z-index: 50;
+  }
+  .zoom-controls button {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    width: 32px; height: 32px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .zoom-controls button:hover { border-color: var(--accent); }
+
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div class="top-bar">
+  <h1>Plan and Iterate HFA_research</h1>
+  <span class="working-dir">Working dir: /path/to/project</span>
+  <div style="flex:1"></div>
+  <div class="breadcrumbs" id="breadcrumbs">
+    <span class="crumb current">Root</span>
+  </div>
+</div>
+
+<div class="main-area">
+  <div class="canvas-wrapper" id="canvasWrapper">
+    <div id="canvas">
+      <svg class="connections-svg" id="connectionsSvg">
+        <defs>
+          <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" />
+          </marker>
+        </defs>
+      </svg>
+    </div>
+    <div class="zoom-controls">
+      <button id="zoomIn" title="Zoom in">+</button>
+      <button id="zoomOut" title="Zoom out">-</button>
+      <button id="zoomFit" title="Fit to view">Fit</button>
+    </div>
+  </div>
+
+  <div class="side-panel" id="sidePanel">
+    <div class="panel-empty" id="panelEmpty">
+      Click a node to view its prompt.<br>
+      Double-click an HFA node to enter it.<br>
+      Drag to pan, scroll to zoom.
+    </div>
+    <div id="panelContent" style="display:none"></div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+// GRAPH DATA
+// ═══════════════════════════════════════════════════════════════
+const GRAPH = {"name":"Plan and Iterate HFA_research","start_node":"f4f44a13-7701-4bda-911a-275f5a858d05","working_directory":"/path/to/project","nodes":{"2e79966e-4790-4b84-a4ed-a5915f4a6120":{"id":"2e79966e-4790-4b84-a4ed-a5915f4a6120","name":"Satisfied_with_research","model":"claude-opus-4-6","persistent_context":false,"position":{"x":-213.24186109162153,"y":238.99615799345173},"prompt":"Keep track of a counter.md where you'll write how many iterations have passed. If there's none, make one right now with the number one in it and you'll increment it each visit up to 10. After 10, you'll automatically be satisfied no matter what. You may also end early if you are satisfied that the preliminary research is done.","transitions":[{"label":"Unsatisfied","target_state":"Preliminary Research"},{"label":"Satisfied","target_state":"Planner"}]},"6c156262-ccab-43fb-bb6b-11e842478d8a":{"id":"6c156262-ccab-43fb-bb6b-11e842478d8a","name":"Planner","model":"claude-opus-4-6","persistent_context":false,"position":{"x":47.12272912905364,"y":285.34883209244725},"prompt":"You are the Planner node. You (generally) receive an idea or task description as input. Your job is to break it down into a step-by-step plan of incremental coding steps. Each step should be small enough that only a few tests are needed to validate it. Output a numbered list of steps. The first step should be the simplest foundation, and each subsequent step builds on the previous ones. Save the plan to plan.md\n\nComplex projects with several ideas and phases could easily take 50 steps, breaking down phases into detailed parts","transitions":[{"label":"Plan ready","target_state":"Verify plan"}]},"8e4c96f6-0b52-4c9f-a19a-c63f66562389":{"id":"8e4c96f6-0b52-4c9f-a19a-c63f66562389","name":"Check Progress","model":"claude-opus-4-6","persistent_context":true,"position":{"x":850,"y":300},"prompt":"You are the Check Progress node. Review the plan.md, step_tracker.md, and the code changes to determine if all steps have been completed. If there are more steps remaining, transition back to the Step Iterator with 'More steps'. If all steps are done, transition to 'All done' to produce the final output. Your job is to also commit all the files.  If no git repository exists, make one please.\n\nIt is not your job to determine if something is too risky. do not defer work with statements like \"Not Implemented (deferred as separate, riskier work)\"","transitions":[{"label":"More steps","target_state":"Step Iterator"},{"label":"All done","target_state":"Final Output"}]},"d4d10204-2f99-4b8f-bcb9-2c5c2fc8e793":{"id":"d4d10204-2f99-4b8f-bcb9-2c5c2fc8e793","name":"AgentCoder2","model":"claude-opus-4-6","persistent_context":false,"position":{"x":598.653741003536,"y":175.02027014575143},"prompt":"","transitions":[{"label":"Step complete","target_state":"Check Progress"}],"is_hfa":true,"forward_incoming_to_children":true,"child_graph":{"start_node":"b644e08e-4a8b-43ee-9829-fa6507d09e1f","nodes":{"05640cf9-5544-4d69-aeec-a5bbda484741":{"id":"05640cf9-5544-4d69-aeec-a5bbda484741","name":"Agentless Automated Program Repair","model":"claude-opus-4-6","persistent_context":false,"position":{"x":236.9469844695176,"y":271.0314524031691},"prompt":"","transitions":[{"label":"Run tests","target_state":"Test Executor Agent"}],"is_hfa":true,"child_graph":{"start_node":"da82be11-9a20-4801-9883-701f83aa6ea6","nodes":{"0358008b-87ed-4077-804c-467aa39a9671":{"id":"0358008b-87ed-4077-804c-467aa39a9671","name":"Patch Validation and Ranking","model":"claude-opus-4-6","persistent_context":false,"position":{"x":1337.0228139945336,"y":235.07662057706005},"prompt":"You are the Patch Validation and Ranking agent in the Agentless pipeline. You receive candidate patches along with selected regression tests and reproduction tests.\n\nYour task is to validate each candidate patch and produce a final ranking.\n\nSteps to follow:\n1. For each candidate patch:\n   a. Apply the patch conceptually (or actually if the working directory is available)\n   b. Analyze whether it would pass the reproduction test\n   c. Analyze whether it would pass all regression tests\n   d. Check for potential side effects or regressions in other parts of the codebase\n2. Score each patch on:\n   - Correctness: does it actually fix the bug?\n   - Safety: does it avoid breaking existing functionality?\n   - Minimality: is it a clean, minimal change?\n   - Code quality: does it follow the project's coding conventions?\n3. Produce a final ranked list of patches from best to worst.\n4. For the top-ranked patch, provide a detailed justification of why it is the best choice.\n\nYour ranking determines which patch is ultimately submitted as the fix.","transitions":[{"label":"Best patch selected","target_state":"Submit Final Patch"}]},"13df41d9-c5fe-4ddc-85af-beda335e4018":{"id":"13df41d9-c5fe-4ddc-85af-beda335e4018","name":"Candidate Patch Generation","model":"claude-opus-4-6","persistent_context":false,"position":{"x":866.2213115487509,"y":488.2334866910097},"prompt":"You are the Patch Generation agent in the Agentless pipeline. You receive precise edit locations from the localization phase.\n\nYour task is to generate multiple candidate patches (in unified diff format) that could fix the bug.\n\nSteps to follow:\n1. Review the edit locations, bug description, and reasoning from the previous steps.\n2. For each edit location, generate 3-5 different candidate patches. Vary your approach:\n   - Minimal fix: smallest possible change that addresses the issue\n   - Defensive fix: adds additional guards or checks\n   - Refactoring fix: restructures code to avoid the bug pattern entirely\n3. Each patch must be in valid unified diff format that can be applied with `git apply`.\n4. For each patch, explain:\n   - What it changes and why\n   - Potential side effects or risks\n   - Confidence level (high/medium/low)\n5. Ensure patches do not introduce new bugs, break existing tests, or change unrelated behavior.\n\nGenerate diverse patches to maximize the chance that at least one is correct. The validation phase will test and rank them.","transitions":[{"label":"Patches generated","target_state":"Test Selection and Reproduction"}]},"2ae78f00-b2ea-426c-997d-dc8c91f24a9c":{"id":"2ae78f00-b2ea-426c-997d-dc8c91f24a9c","name":"Function-Level Localization","model":"claude-opus-4-6","persistent_context":false,"position":{"x":218.56170202638043,"y":277.2694315960516},"prompt":"You are the Function-Level Localization agent in the Agentless pipeline. You receive a ranked list of suspect source files from the previous file-level localization step.\n\nYour task is to narrow down the fault location from files to specific classes, methods, or functions.\n\nSteps to follow:\n1. Read each candidate file identified in the previous step.\n2. For each file, examine its classes and functions. Cross-reference with the bug description, stack traces, and test failures to identify which specific functions are most likely to contain the bug.\n3. Consider: does the function name match the failing behavior? Is it called in the failing code path? Does it handle the edge case described in the bug report?\n4. Rank the candidate functions by likelihood, providing file path, function name, line range, and reasoning.\n5. Output your top candidate functions (up to 10) with confidence scores and explanations.\n\nBe thorough but precise. The next step will determine the exact edit locations within these functions.","transitions":[{"label":"Functions identified","target_state":"Edit-Level Localization"}]},"3df435ce-4b61-4d93-897a-311dcaea834d":{"id":"3df435ce-4b61-4d93-897a-311dcaea834d","name":"Submit Final Patch","model":"claude-opus-4-6","persistent_context":false,"position":{"x":1499.383877539008,"y":98.76138497724095},"prompt":"You are the Final Submission agent in the Agentless pipeline. You receive the top-ranked patch from the validation and ranking phase.\n\nYour task is to prepare and present the final patch for submission.\n\nSteps to follow:\n1. Review the top-ranked patch and its validation results from the previous step.\n2. Verify the patch is in correct unified diff format and can be cleanly applied.\n3. Produce a final summary report containing:\n   - Bug description (from original issue)\n   - Root cause analysis\n   - Files and functions modified\n   - The final patch in unified diff format\n   - Test results summary\n   - Confidence assessment\n4. If the working directory is available, apply the patch using `git apply` and verify it works.\n5. Present the complete fix with all supporting evidence.\n\nThis is the terminal node. Your output is the final deliverable of the Agentless pipeline.","transitions":[]},"849f1456-0656-44ac-8ac7-67a2476b866f":{"id":"849f1456-0656-44ac-8ac7-67a2476b866f","name":"Edit-Level Localization","model":"claude-opus-4-6","persistent_context":false,"position":{"x":499.3872955566704,"y":410.339066348256},"prompt":"You are the Edit-Level Localization agent in the Agentless pipeline. You receive a ranked list of suspect functions from the previous function-level localization step.\n\nYour task is to determine the precise edit locations \u2014 the exact lines of code that need to be changed to fix the bug.\n\nSteps to follow:\n1. Read the candidate functions identified in the previous step.\n2. Analyze each function's logic carefully. Look for:\n   - Off-by-one errors, incorrect boundary checks\n   - Missing null/edge-case handling\n   - Wrong variable references or typos\n   - Logic inversions (e.g., using AND instead of OR)\n   - Missing or incorrect return statements\n3. For each candidate edit location, specify:\n   - File path and exact line numbers\n   - The current buggy code\n   - A description of what is wrong\n   - What the fix should look like conceptually\n4. Rank your edit locations by confidence.\n\nThis is the final localization step. Your output will be used by the repair agent to generate actual patches.","transitions":[{"label":"Edit locations identified","target_state":"Candidate Patch Generation"}]},"a35e7641-79b7-458c-a2e5-bed6f7352a4b":{"id":"a35e7641-79b7-458c-a2e5-bed6f7352a4b","name":"Test Selection and Reproduction","model":"claude-opus-4-6","persistent_context":false,"position":{"x":1169.793151082882,"y":394.1110621101823},"prompt":"You are the Test Selection and Reproduction agent in the Agentless pipeline. You receive candidate patches from the repair phase.\n\nYour task is to select relevant regression tests and generate reproduction tests for the bug.\n\nSteps to follow:\n1. Identify existing test files in the repository that exercise the buggy code paths. Look for tests that import or call the modified functions.\n2. Select the most relevant regression tests that would catch if the bug is properly fixed or if a patch introduces regressions.\n3. Write a minimal reproduction test that:\n   - Triggers the original bug (fails before fix)\n   - Passes after a correct fix is applied\n   - Is isolated and does not depend on external state\n4. For each candidate patch, predict whether the regression tests and reproduction test would pass.\n5. Output: the list of selected regression tests, the reproduction test code, and your initial ranking of patches based on test analysis.\n\nThorough test selection is critical \u2014 it determines which patches survive to the final ranking.","transitions":[{"label":"Tests selected","target_state":"Patch Validation and Ranking"}]},"da82be11-9a20-4801-9883-701f83aa6ea6":{"id":"da82be11-9a20-4801-9883-701f83aa6ea6","name":"File-Level Fault Localization","model":"claude-opus-4-6","persistent_context":false,"position":{"x":51.29259014299801,"y":140.95170253386624},"prompt":"You are the File-Level Fault Localization agent in the Agentless automated program repair pipeline. Your task is to identify which source files in the repository are most likely to contain the bug described in the issue or failing test provided as input data.\n\nSteps to follow:\n1. Read the bug report or failing test information from the incoming data carefully.\n2. Use the repository structure to understand the codebase layout. List top-level directories and key modules.\n3. Based on the bug description, stack traces, error messages, and code structure, rank the source files by likelihood of containing the fault.\n4. For each candidate file, explain WHY you believe it may contain the bug (e.g., it handles the failing functionality, it appears in the stack trace, it was recently modified).\n5. Output your top 5 candidate files ranked by confidence, along with your reasoning.\n\nFocus on precision: it is better to have fewer high-confidence candidates than many low-confidence ones. The next phase will narrow down to specific functions within these files.","transitions":[{"label":"Files identified","target_state":"Function-Level Localization"}]}}}},"6d024f7e-4d0a-46d2-8008-00bf6bcca8af":{"id":"6d024f7e-4d0a-46d2-8008-00bf6bcca8af","name":"Test Executor Agent","model":"claude-opus-4-6","persistent_context":true,"position":{"x":624.7868979095773,"y":202.99717674376592},"prompt":"You are the Test Executor Agent. Your job is PURELY MECHANICAL \u2014 run tests and route based on results. Do NOT attempt to fix code or analyze solutions.\n\nStep 1: Run the tests\n\nStep 2: Count your visits by examining your <persistent_node_context>. Count the number of <visit> tags. Add 1 for this current visit. That is your current visit number.\n\nStep 3: Route based on results:\n\nIF the output contains \"ALL TESTS PASSED\":\n  \u2192 Transition to \"Done\"\n  \u2192 In your data, read and include the final solution code\n\nIF there are errors AND this is visit 5 or higher:\n  \u2192 Transition to \"Done\"\n  \u2192 Note that iteration budget (5) was exhausted\n\nIF there are errors AND this is visit 1-4:\n  \u2192 Transition to \"Retry\"\n  \u2192 In your data, include ALL of the following in this exact structure:\n\n<test_feedback>\n  <task_description>[paste the task description from previous_state_data]</task_description>\n  <iteration>[current visit number] of 5</iteration>\n  <error_output>[paste the COMPLETE stderr/stdout from the test run]</error_output>\n  <failed_tests>[list which specific tests failed]</failed_tests>\n</test_feedback>\n\nDo NOT summarize or truncate the error output. Include it in full.","transitions":[{"label":"Retry","target_state":"Agentless Automated Program Repair"},{"label":"Done","target_state":"Output Result"}]},"ab444956-7fd0-43ab-92e3-964d3078b054":{"id":"ab444956-7fd0-43ab-92e3-964d3078b054","name":"Programmer Agent","model":"claude-opus-4-6","persistent_context":false,"position":{"x":531,"y":7.0000152587890625},"prompt":"You are the Programmer Agent in the AgentCoder multi-agent framework. Your job is to generate or refine a solution for a coding task.\n\n\nUse Chain-of-Thought reasoning following these exact steps:\n1. **Understand and Clarify**: Make sure you understand the task. Restate the problem in your own words, identify the inputs, outputs, and constraints.\n2. **Algorithm/Method Selection**: Decide on the most efficient way to solve the problem. Consider time and space complexity. Justify your choice.\n3. **Pseudocode Creation**: Write down the steps you will follow in pseudocode. This should be detailed enough to translate directly to code.\n4. **Code Generation**: Translate your pseudocode into executable Python code. Ensure it handles all constraints mentioned in the task.\n\n\n**Do not run tests**:  You may view them if necessary. You run tests by transitioning to the next state.","transitions":[{"label":"Run tests","target_state":"Test Executor Agent"}]},"b644e08e-4a8b-43ee-9829-fa6507d09e1f":{"id":"b644e08e-4a8b-43ee-9829-fa6507d09e1f","name":"Test Designer Agent","model":"claude-opus-4-6","persistent_context":false,"position":{"x":100,"y":150},"prompt":"You are the Test Designer Agent in the AgentCoder multi-agent framework. Your job is to generate comprehensive test cases for a coding task \u2014 WITHOUT seeing any solution code. You must generate tests independently to ensure objectivity.\n\nCRITICAL: Your tests must be CORRECT. An incorrect test will cause the programmer to chase phantom bugs. Double-check every expected value before writing it. Manually trace through the logic for each test case to verify the expected output.\n\nRead the task description from the incoming data. Then:\n1. Create Python tests wherever appropriate\n2. Generate three categories of tests:\n   - **Basic tests** (at least 5): To verify the fundamental functionality under normal conditions. Cover typical inputs and standard use cases.\n   - **Edge case tests** (at least 5): To evaluate behavior under extreme or unusual conditions. Boundary conditions, empty inputs, single elements, negative numbers, zero, special characters, maximum/minimum values, etc. Pay special attention to edge cases as they often reveal hidden bugs.\n   - **Large scale tests** (at least 3): To assess performance and scalability with large data samples. Generate large inputs programmatically and verify correctness.\n3. Use simple assert statements (not unittest/pytest frameworks)\n4. Each assert should include a descriptive message string as the second argument, e.g. `assert result == 5, f'Expected 5 but got {result}'`\n5. Do NOT use try/except in tests \u2014 let errors propagate naturally so the executor sees the real error and traceback.\n6. End the test file with `print(\"ALL TESTS PASSED\")` if no assertions fail\n7. Each test should print which test is running before executing\n\nWrite the file using the Write tool. Pass the task description forward in your data output unchanged.","transitions":[{"label":"Generate code","target_state":"Programmer Agent"}]},"c55eb896-0e05-4106-bb30-f2bfa14fbc6b":{"id":"c55eb896-0e05-4106-bb30-f2bfa14fbc6b","name":"Output Result","model":"claude-opus-4-6","persistent_context":false,"position":{"x":1000,"y":150},"prompt":"You are the final output node. Present the results of the AgentCoder workflow.\n\nReport the following:\n1. **Status**: Whether all tests passed, or iteration budget was exhausted\n2. **Iterations used**: How many Programmer \u2192 Test Executor cycles occurred\n3. **Final solution**: Display the complete solution code from the data you received\n\nFormat the solution code in a Python code block.","transitions":[]}}}},"ded73d06-c047-42f1-aae6-c108ab65bf83":{"id":"ded73d06-c047-42f1-aae6-c108ab65bf83","name":"Step Iterator","model":"claude-opus-4-6","persistent_context":false,"position":{"x":349.9825932151771,"y":295.85697995232533},"prompt":"You are the Step Iterator. You read a plan file (plan.md, numbered list of steps) and progress so far. Extract the next incomplete step from the plan and dispatch it to the AgentCoder HFA for implementation. Pass the step description, any context from previous steps, and the overall plan as data.\n\nAgentCoder2 implements the step, not you, you execute agentcoder2 by transitioning using the execute step transition.  You are just the step iterator. Do not do anything else other than iterate the steps and at most make sure we're actually on the correct step. use/create a file called step_tracker.md","transitions":[{"label":"Execute step","target_state":"AgentCoder2"}]},"f02c9377-ede2-4502-931f-a792f369ef30":{"id":"f02c9377-ede2-4502-931f-a792f369ef30","name":"Final Output","model":"claude-opus-4-6","persistent_context":false,"position":{"x":1100,"y":300},"prompt":"You are the Final Output node. Present a summary of all completed steps, the final integrated solution, and any notes about the implementation.","transitions":[]},"f4f44a13-7701-4bda-911a-275f5a858d05":{"id":"f4f44a13-7701-4bda-911a-275f5a858d05","name":"Preliminary Research","model":"claude-opus-4-6","persistent_context":false,"position":{"x":-441.13009035708876,"y":307.14490470443593},"prompt":"You are to do a literature review of the topic at hand, looking at websites or research papers, and/or local code base, or whatever we need to get a background on how to resolve the task at hand.\n\nPut everything in a related work folder.","transitions":[{"label":"done","target_state":"Satisfied_with_research"}]},"7524b6d7-7753-411c-8e81-18063ef59856":{"id":"7524b6d7-7753-411c-8e81-18063ef59856","name":"Verify plan","model":"claude-opus-4-6","persistent_context":false,"position":{"x":208.19701036368116,"y":185.6915387041684},"prompt":"Verify the plan in plan.md addresses all aspects of the user request. Ensure not only a comprehensive plan, but also that it does not overcomplicate the user request. Either accept or reject with feedback","transitions":[{"label":"Rejected","target_state":"Planner"},{"label":"Approved","target_state":"Step Iterator"}]}}};
+
+// ═══════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════
+let navPath = [];       // [{hfaNodeId, graphRef, panX, panY, zoom}]
+let panX = 400, panY = 100;
+let zoomLevel = 1;
+let isPanning = false, panStartX, panStartY;
+let selectedNodeId = null;
+let lastClickNodeId = null, lastClickTime = 0;
+let isDragging = false;
+
+const canvas = document.getElementById('canvas');
+const svg = document.getElementById('connectionsSvg');
+const wrapper = document.getElementById('canvasWrapper');
+const sidePanel = document.getElementById('sidePanel');
+const panelEmpty = document.getElementById('panelEmpty');
+const panelContent = document.getElementById('panelContent');
+const breadcrumbs = document.getElementById('breadcrumbs');
+
+// ═══════════════════════════════════════════════════════════════
+// HFA NAVIGATION
+// ═══════════════════════════════════════════════════════════════
+function getActiveGraph() {
+  let current = GRAPH;
+  for (const entry of navPath) {
+    const hfaNode = current.nodes[entry.hfaNodeId];
+    current = hfaNode.child_graph;
+  }
+  return current;
+}
+
+function navigateInto(hfaNodeId) {
+  navPath.push({ hfaNodeId, panX, panY, zoomLevel });
+  panX = 200; panY = 50; zoomLevel = 1;
+  selectedNodeId = null;
+  panelEmpty.style.display = '';
+  panelContent.style.display = 'none';
+  renderAll();
+}
+
+function navigateToLevel(level) {
+  while (navPath.length > level) {
+    const popped = navPath.pop();
+    panX = popped.panX;
+    panY = popped.panY;
+    zoomLevel = popped.zoomLevel;
+  }
+  selectedNodeId = null;
+  panelEmpty.style.display = '';
+  panelContent.style.display = 'none';
+  renderAll();
+}
+
+function renderBreadcrumbs() {
+  breadcrumbs.innerHTML = '';
+  const crumb0 = document.createElement('span');
+  crumb0.className = 'crumb' + (navPath.length === 0 ? ' current' : '');
+  crumb0.textContent = GRAPH.name;
+  crumb0.onclick = () => navigateToLevel(0);
+  breadcrumbs.appendChild(crumb0);
+
+  let g = GRAPH;
+  navPath.forEach((entry, i) => {
+    const sep = document.createElement('span');
+    sep.className = 'sep';
+    sep.textContent = ' > ';
+    breadcrumbs.appendChild(sep);
+
+    const node = g.nodes[entry.hfaNodeId];
+    g = node.child_graph;
+    const crumb = document.createElement('span');
+    crumb.className = 'crumb' + (i === navPath.length - 1 ? ' current' : '');
+    crumb.textContent = node.name;
+    crumb.onclick = () => navigateToLevel(i + 1);
+    breadcrumbs.appendChild(crumb);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// RESOLVE TARGETS
+// ═══════════════════════════════════════════════════════════════
+function resolveTargetNode(targetState, nodes) {
+  if (nodes[targetState]) return targetState;
+  for (const [nid, n] of Object.entries(nodes)) {
+    if (n.name === targetState) return nid;
+  }
+  return null;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// RENDERING
+// ═══════════════════════════════════════════════════════════════
+function renderAll() {
+  renderNodes();
+  // Wait for layout so we can measure node sizes
+  requestAnimationFrame(() => {
+    renderConnections();
+  });
+  updateTransform();
+  renderBreadcrumbs();
+}
+
+function updateTransform() {
+  canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${zoomLevel})`;
+}
+
+function renderNodes() {
+  canvas.querySelectorAll('.node').forEach(el => el.remove());
+  const ag = getActiveGraph();
+
+  Object.values(ag.nodes).forEach(node => {
+    const div = document.createElement('div');
+    div.className = 'node';
+    div.dataset.nodeId = node.id;
+    if (node.id === selectedNodeId) div.classList.add('selected');
+    if (node.id === ag.start_node) div.classList.add('start-node');
+    if (node.is_hfa) div.classList.add('hfa-node');
+    if (!node.transitions || node.transitions.length === 0) div.classList.add('terminal-node');
+    div.style.left = node.position.x + 'px';
+    div.style.top = node.position.y + 'px';
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'node-name';
+    nameSpan.textContent = node.name;
+    div.appendChild(nameSpan);
+
+    if (node.is_hfa) {
+      const badge = document.createElement('span');
+      badge.className = 'hfa-badge';
+      const childCount = Object.keys(node.child_graph?.nodes || {}).length;
+      badge.textContent = childCount > 0 ? `HFA (${childCount})` : 'HFA';
+      div.appendChild(badge);
+
+      const hint = document.createElement('div');
+      hint.className = 'hfa-enter-hint';
+      hint.textContent = 'double-click to enter';
+      div.appendChild(hint);
+    }
+
+    if (node.persistent_context) {
+      const pb = document.createElement('span');
+      pb.className = 'persistent-badge';
+      pb.textContent = 'persistent';
+      div.appendChild(pb);
+    }
+
+    // Mouse handling: click to select, double-click to enter HFA
+    div.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      isDragging = false;
+
+      const onMouseMove = () => { isDragging = true; };
+      const onMouseUp = () => {
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+        if (!isDragging) {
+          const now = Date.now();
+          if (node.id === lastClickNodeId && (now - lastClickTime) < 400) {
+            lastClickNodeId = null;
+            lastClickTime = 0;
+            if (node.is_hfa) navigateInto(node.id);
+          } else {
+            lastClickNodeId = node.id;
+            lastClickTime = now;
+            selectNode(node.id);
+          }
+        }
+        isDragging = false;
+      };
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+    });
+
+    canvas.appendChild(div);
+  });
+}
+
+function getRectEdgePoint(cx, cy, w, h, angle) {
+  const halfW = w / 2, halfH = h / 2;
+  const cos = Math.cos(angle), sin = Math.sin(angle);
+  const tX = cos !== 0 ? halfW / Math.abs(cos) : Infinity;
+  const tY = sin !== 0 ? halfH / Math.abs(sin) : Infinity;
+  const t = Math.min(tX, tY);
+  return { x: cx + cos * t, y: cy + sin * t };
+}
+
+function renderConnections() {
+  svg.querySelectorAll('path.conn, text.conn-label').forEach(el => el.remove());
+  const ag = getActiveGraph();
+
+  // Detect bidirectional pairs
+  const directedEdges = new Set();
+  Object.values(ag.nodes).forEach(src => {
+    (src.transitions || []).forEach(tr => {
+      const tid = resolveTargetNode(tr.target_state, ag.nodes);
+      if (tid && tid !== src.id) directedEdges.add(src.id + '->' + tid);
+    });
+  });
+  const bidir = new Set();
+  directedEdges.forEach(e => {
+    const [a, b] = e.split('->');
+    if (directedEdges.has(b + '->' + a)) { bidir.add(e); bidir.add(b + '->' + a); }
+  });
+
+  Object.values(ag.nodes).forEach(srcNode => {
+    const srcEl = canvas.querySelector(`[data-node-id="${srcNode.id}"]`);
+    if (!srcEl) return;
+
+    (srcNode.transitions || []).forEach(tr => {
+      const targetId = resolveTargetNode(tr.target_state, ag.nodes);
+      if (!targetId) return;
+      const tgtEl = canvas.querySelector(`[data-node-id="${targetId}"]`);
+      if (!tgtEl) return;
+      const targetNode = ag.nodes[targetId];
+
+      const sx = srcNode.position.x + srcEl.offsetWidth / 2;
+      const sy = srcNode.position.y + srcEl.offsetHeight / 2;
+      const tx = targetNode.position.x + tgtEl.offsetWidth / 2;
+      const ty = targetNode.position.y + tgtEl.offsetHeight / 2;
+
+      // Self-loop
+      if (srcNode.id === targetId) {
+        const loopPath = `M${sx},${sy - 20} C${sx - 60},${sy - 80} ${sx + 60},${sy - 80} ${sx},${sy - 20}`;
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', loopPath);
+        path.setAttribute('marker-end', 'url(#arrowhead)');
+        path.classList.add('conn');
+        svg.appendChild(path);
+        const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        label.setAttribute('x', sx);
+        label.setAttribute('y', sy - 85);
+        label.setAttribute('text-anchor', 'middle');
+        label.classList.add('conn-label');
+        label.textContent = tr.label.trim();
+        svg.appendChild(label);
+        return;
+      }
+
+      const dx = tx - sx, dy = ty - sy;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      let nx = 0, ny = 0;
+      const edgeKey = srcNode.id + '->' + targetId;
+      if (bidir.has(edgeKey) && dist > 0) {
+        const curv = Math.min(dist * 0.1, 40);
+        const sign = srcNode.id < targetId ? 1 : -1;
+        const cdx = srcNode.id < targetId ? dx : -dx;
+        const cdy = srcNode.id < targetId ? dy : -dy;
+        nx = -cdy / dist * curv * sign;
+        ny = cdx / dist * curv * sign;
+      }
+
+      const effTx = tx + nx, effTy = ty + ny;
+      const effSx = sx + nx, effSy = sy + ny;
+      const departAngle = Math.atan2(effTy - sy, effTx - sx);
+      const startPt = getRectEdgePoint(sx, sy, srcEl.offsetWidth, srcEl.offsetHeight, departAngle);
+      const arrivalAngle = Math.atan2(effSy - ty, effSx - tx);
+      const endPt = getRectEdgePoint(tx, ty, tgtEl.offsetWidth, tgtEl.offsetHeight, arrivalAngle);
+      const cpDist = Math.min(dist * 0.25, 60);
+      const cx1 = startPt.x + Math.cos(departAngle) * cpDist;
+      const cy1 = startPt.y + Math.sin(departAngle) * cpDist;
+      const cx2 = endPt.x - Math.cos(departAngle) * cpDist;
+      const cy2 = endPt.y - Math.sin(departAngle) * cpDist;
+
+      const d = `M${startPt.x},${startPt.y} C${cx1},${cy1} ${cx2},${cy2} ${endPt.x},${endPt.y}`;
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', d);
+      path.setAttribute('marker-end', 'url(#arrowhead)');
+      path.classList.add('conn');
+      svg.appendChild(path);
+
+      const mx = (sx + tx) / 2 + nx;
+      const my = (sy + ty) / 2 + ny;
+      const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      label.setAttribute('x', mx);
+      label.setAttribute('y', my - 6);
+      label.setAttribute('text-anchor', 'middle');
+      label.classList.add('conn-label');
+      label.textContent = tr.label.trim();
+      svg.appendChild(label);
+    });
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SELECTION + DETAIL PANEL
+// ═══════════════════════════════════════════════════════════════
+function selectNode(nodeId) {
+  selectedNodeId = nodeId;
+  canvas.querySelectorAll('.node').forEach(el => {
+    el.classList.toggle('selected', el.dataset.nodeId === nodeId);
+  });
+  const ag = getActiveGraph();
+  const node = ag.nodes[nodeId];
+  if (!node) return;
+  showDetail(node, ag.nodes);
+}
+
+function esc(s) {
+  if (!s) return '';
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function buildAutoAppended(node, allNodes) {
+  const transitions = node.transitions || [];
+  let transLines = [];
+  for (const t of transitions) {
+    let targetName = t.target_state;
+    for (const [nid, n] of Object.entries(allNodes)) {
+      if (n.name === targetName || nid === targetName) { targetName = n.name; break; }
+    }
+    transLines.push(`- ${t.label}: proceeds to "${targetName}" node`);
+  }
+  const transText = transLines.length > 0 ? transLines.join('\n') : '- (no transitions defined - this is a terminal node)';
+
+  return `---
+You are a node in a state machine. After completing the task above, you MUST end your response with a structured output block in exactly this format:
+
+<state_machine_output>
+  <transition>TRANSITION_LABEL</transition>
+  <data>
+    YOUR XML DATA HERE
+  </data>
+</state_machine_output>
+
+Available transitions (choose exactly one):
+${transText}
+- __human_feedback__: use ONLY if the task is genuinely ambiguous and you need clarification from the human operator. Put your question in the <data> tag.
+
+IMPORTANT: The next state has NO memory of this conversation \u2014 it can read files but the ONLY context it receives is what you put in your <data> tag. Include a useful summary of your work, findings, and any information the next node needs to continue. Do not just pass the original query. Make your report as simple as possible, but no simpler.
+
+CRITICAL: Do YOUR node's job, then TRANSITION. Do NOT do the next node's job. If you're a tester, report bugs \u2014 don't fix them. If you're a planner, make the plan \u2014 don't implement it. You will be revisited with full context. Trust the workflow: transition to let the right node handle the next step.
+
+Data from the previous state:
+<previous_state_data>
+{incoming data from prior node}
+</previous_state_data>`;
+}
+
+function showDetail(node, allNodes) {
+  panelEmpty.style.display = 'none';
+  panelContent.style.display = '';
+
+  const ag = getActiveGraph();
+  let badges = [];
+  if (node.id === ag.start_node) badges.push('Start Node');
+  if (node.is_hfa) badges.push('HFA (Hierarchical)');
+  if (node.persistent_context) badges.push('Persistent Context');
+  if (node.model) badges.push(node.model);
+  if (node.forward_incoming_to_children) badges.push('Forwards input to children');
+  if (!node.transitions || node.transitions.length === 0) badges.push('Terminal');
+
+  let transHTML = '';
+  if (node.transitions && node.transitions.length > 0) {
+    transHTML = `<div class="panel-section">
+      <div class="section-title">Transitions</div>
+      <ul class="transitions-list">
+        ${node.transitions.map(t => `<li><span class="t-label">${esc(t.label.trim())}</span><span class="t-arrow">\u2192</span><span class="t-target">${esc(t.target_state)}</span></li>`).join('')}
+      </ul>
+    </div>`;
+  } else {
+    transHTML = `<div class="panel-section">
+      <div class="section-title">Transitions</div>
+      <div style="font-size:12px;color:var(--red)">Terminal node - no outgoing transitions</div>
+    </div>`;
+  }
+
+  let childInfo = '';
+  if (node.is_hfa && node.child_graph) {
+    const childNames = Object.values(node.child_graph.nodes).map(n => n.name);
+    const startNode = node.child_graph.nodes[node.child_graph.start_node];
+    childInfo = `<div class="panel-section">
+      <div class="section-title">Child Graph</div>
+      <div style="font-size:12px;color:var(--text-muted);line-height:1.8">
+        <strong style="color:var(--green)">Start:</strong> ${esc(startNode?.name || '?')}<br>
+        <strong>${childNames.length} nodes:</strong> ${childNames.map(n => esc(n)).join(', ')}
+      </div>
+    </div>`;
+  }
+
+  const autoAppended = buildAutoAppended(node, allNodes);
+  const appendSystem = `CRITICAL REQUIREMENT: You MUST end your response with a <state_machine_output> XML block. If you launched subagents using the Task tool, you MUST call TaskOutput to collect their results BEFORE producing your final response. Never say 'I will wait' \u2014 actually call TaskOutput with block: true to wait. Do not end your turn while tasks are pending.`;
+
+  panelContent.innerHTML = `
+    <div class="panel-header">
+      <h2>${esc(node.name)}</h2>
+      <div class="panel-meta">${badges.map(b => `<span class="tag">${esc(b)}</span>`).join('')}</div>
+    </div>
+    ${transHTML}
+    ${childInfo}
+    <div class="panel-section">
+      <div class="section-title">Full Prompt (as sent to Claude)</div>
+      <div class="toggle-row">
+        <input type="checkbox" id="showAuto" checked>
+        <label for="showAuto">Show auto-appended state machine instructions</label>
+      </div>
+      <div class="prompt-block"><span>${esc(node.prompt || '(empty prompt)')}</span><span class="auto-section" id="autoSection">
+
+${esc(autoAppended)}</span></div>
+    </div>
+    <div class="panel-section">
+      <div class="section-title">--append-system-prompt (CLI flag)</div>
+      <div class="prompt-block" style="font-size:11px;color:var(--text-muted);max-height:150px">${esc(appendSystem)}</div>
+    </div>
+  `;
+
+  document.getElementById('showAuto').addEventListener('change', (e) => {
+    document.getElementById('autoSection').style.display = e.target.checked ? '' : 'none';
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PAN & ZOOM
+// ═══════════════════════════════════════════════════════════════
+wrapper.addEventListener('mousedown', (e) => {
+  if (e.target !== wrapper && !e.target.classList.contains('connections-svg')) return;
+  isPanning = true;
+  panStartX = e.clientX - panX;
+  panStartY = e.clientY - panY;
+  e.preventDefault();
+});
+document.addEventListener('mousemove', (e) => {
+  if (!isPanning) return;
+  panX = e.clientX - panStartX;
+  panY = e.clientY - panStartY;
+  updateTransform();
+});
+document.addEventListener('mouseup', () => { isPanning = false; });
+
+wrapper.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const rect = wrapper.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  const oldZoom = zoomLevel;
+  const delta = e.deltaY > 0 ? 0.9 : 1.1;
+  zoomLevel = Math.max(0.15, Math.min(4, zoomLevel * delta));
+  panX = mx - (mx - panX) * (zoomLevel / oldZoom);
+  panY = my - (my - panY) * (zoomLevel / oldZoom);
+  updateTransform();
+}, { passive: false });
+
+document.getElementById('zoomIn').onclick = () => { zoomLevel = Math.min(4, zoomLevel * 1.2); updateTransform(); };
+document.getElementById('zoomOut').onclick = () => { zoomLevel = Math.max(0.15, zoomLevel * 0.8); updateTransform(); };
+document.getElementById('zoomFit').onclick = () => {
+  const ag = getActiveGraph();
+  const nodes = Object.values(ag.nodes);
+  if (nodes.length === 0) return;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  nodes.forEach(n => {
+    minX = Math.min(minX, n.position.x);
+    minY = Math.min(minY, n.position.y);
+    maxX = Math.max(maxX, n.position.x + 180);
+    maxY = Math.max(maxY, n.position.y + 60);
+  });
+  const graphW = maxX - minX + 100;
+  const graphH = maxY - minY + 100;
+  const wrapRect = wrapper.getBoundingClientRect();
+  zoomLevel = Math.min(wrapRect.width / graphW, wrapRect.height / graphH, 1.5);
+  panX = (wrapRect.width - graphW * zoomLevel) / 2 - minX * zoomLevel + 50 * zoomLevel;
+  panY = (wrapRect.height - graphH * zoomLevel) / 2 - minY * zoomLevel + 50 * zoomLevel;
+  updateTransform();
+};
+
+// ═══════════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════════
+renderAll();
+// Auto-fit on load
+setTimeout(() => document.getElementById('zoomFit').click(), 50);
+</script>
+</body>
+</html>

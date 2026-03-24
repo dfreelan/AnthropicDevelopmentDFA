@@ -1,0 +1,36 @@
+diff --git a/static/app.js b/static/app.js
+index bf1f491..6e7a95c 100644
+--- a/static/app.js
++++ b/static/app.js
+@@ -23,6 +23,9 @@
+   let dragNodeId = null;
+   let dragOffsetX, dragOffsetY;
+ 
++  // Deferred selection timer (allows dblclick to cancel pending selection)
++  let pendingSelectTimeout = null;
++
+   // Auto-save
+   let saveTimeout = null;
+   let dirCheckTimeout = null;
+@@ -513,7 +516,11 @@
+             scheduleSave();
+           }
+           if (!isDragging) {
+-            selectNode(node.id);
++            // Defer selectNode so dblclick can fire on this same DOM element
++            clearTimeout(pendingSelectTimeout);
++            pendingSelectTimeout = setTimeout(() => {
++              selectNode(node.id);
++            }, 300);
+           }
+           isDragging = false;
+           dragNodeId = null;
+@@ -526,6 +533,8 @@
+       div.addEventListener("dblclick", (e) => {
+         if (node.is_hfa) {
+           e.stopPropagation();
++          // Cancel the pending selection — we're navigating into the HFA instead
++          clearTimeout(pendingSelectTimeout);
+           navigateInto(node.id);
+         }
+       });

@@ -1,0 +1,109 @@
+{
+  "id": "590052af-d7b3-49d8-b157-2853cc85cb5d",
+  "name": "Feature Builder",
+  "nodes": {
+    "27ac6a08-659e-4691-8946-2756c1b2fac5": {
+      "child_graph": {
+        "nodes": {},
+        "start_node": null
+      },
+      "id": "27ac6a08-659e-4691-8946-2756c1b2fac5",
+      "is_hfa": true,
+      "model": "claude-opus-4-6",
+      "name": "node_6",
+      "persistent_context": false,
+      "position": {
+        "x": 457.433349609375,
+        "y": 603.9666595458984
+      },
+      "prompt": "",
+      "transitions": []
+    },
+    "3b7e2bd9-9984-4aef-a287-666ae85a8711": {
+      "id": "3b7e2bd9-9984-4aef-a287-666ae85a8711",
+      "model": "claude-opus-4-6",
+      "name": "Implement code",
+      "persistent_context": false,
+      "position": {
+        "x": 288.16749932418037,
+        "y": 262.3201237243602
+      },
+      "prompt": "Please implement the feature! Don't be naive about it, use your beautiful brain!",
+      "transitions": []
+    },
+    "421a16aa-52cd-4930-80fd-b722a51b9547": {
+      "id": "421a16aa-52cd-4930-80fd-b722a51b9547",
+      "model": "claude-opus-4-6",
+      "name": "Understand feature",
+      "position": {
+        "x": 84.55,
+        "y": 0
+      },
+      "prompt": "You are the start node of a feature-building workflow. The user has described a feature they want. Your job is to explore the codebase enough to understand where this feature would fit in, and pass along a simple description of: (1) what the feature is, (2) how the project generally works, and (3) what you think are the most likely files to be modified or created. Use those words, \"most likely\". The next state will not have any other context than what you give it by default (until it reads files). So, keep your communication as simple as possible but absolutely no simpler.",
+      "transitions": [
+        {
+          "data_template": "",
+          "id": "1da660e6-674c-4097-b286-b361851b0440",
+          "label": "Plan feature",
+          "target_state": "Plan feature"
+        }
+      ]
+    },
+    "5e02418a-7b4b-4f42-b26b-e306d5241dde": {
+      "id": "5e02418a-7b4b-4f42-b26b-e306d5241dde",
+      "model": "claude-opus-4-6",
+      "name": "Synthesize plans",
+      "position": {
+        "x": 544.75,
+        "y": 159
+      },
+      "prompt": "You should have been given several plans. This is not a democracy, you are in charge, but don't let the power get to your head! Choose/synthesize a plan that works. feel free to explore the code base yourself. The next state will not have any other context than what you give it by default(until it reads files). So, keep your communication as simple as possible but absolutely no simpler. You are not writing the any code, you pass that along to the implement code state with all that simple as possible but absolutely no simpler information! seriously it will need context, it doesnt know about all the plans and does not need to know them, only what you present as the final plan.",
+      "transitions": [
+        {
+          "data_template": "",
+          "id": "94eeb823-0e1d-4183-8c33-71b612cdd83d",
+          "label": "Implement code",
+          "target_state": "Implement code"
+        }
+      ]
+    },
+    "6a1ebff8-f769-4d52-87c1-8b734ee31762": {
+      "id": "6a1ebff8-f769-4d52-87c1-8b734ee31762",
+      "model": "claude-opus-4-6",
+      "name": "node_6",
+      "persistent_context": false,
+      "position": {
+        "x": 286.8499755859375,
+        "y": 544.0833282470703
+      },
+      "prompt": "",
+      "transitions": []
+    },
+    "91f4c1d3-ca16-4cd7-8f2c-c47500909e4e": {
+      "id": "91f4c1d3-ca16-4cd7-8f2c-c47500909e4e",
+      "model": "claude-opus-4-6",
+      "name": "Plan feature",
+      "position": {
+        "x": 348.65,
+        "y": 107.44
+      },
+      "prompt": "Based on what's been passed to you you're making a plan for a new feature. If it's a UI or complicated feature, spawn between 2 and 5 agents. when in doubt, more agents!! The intention of these agents is that each of them makes their own independent plan to implement the entire feature, candidate plans. The next state will not have any other context than what you give it by default(until it reads files). So, keep your communication as simple as possible but absolutely no simpler. ",
+      "transitions": [
+        {
+          "data_template": "",
+          "id": "a5efb3b1-c796-4225-910c-54c1d750262a",
+          "label": "Synthesize plans",
+          "target_state": "Synthesize plans"
+        },
+        {
+          "data_template": "",
+          "id": "f5d2a7eb-aabf-4804-aaa4-5555f7d0e8e6",
+          "label": "Implement code",
+          "target_state": "Implement code"
+        }
+      ]
+    }
+  },
+  "start_node": "421a16aa-52cd-4930-80fd-b722a51b9547",
+  "working_directory": "PLACEHOLDER/AnthropicDevelopmentDFA"
+}
